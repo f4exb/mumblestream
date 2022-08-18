@@ -1,0 +1,28 @@
+{
+    "vox_silence_time": 2,
+    "audio_threshold": 700,
+    "audio_output_volume": 3,
+    "ptt_on_command": [
+        "/opt/build/sdrangel/scriptsapi/venv/bin/python",
+        "/opt/build/sdrangel/scriptsapi/ptt_feature.py",
+        "-a",
+        "192.168.0.3:8092",
+        "-p",
+        "1",
+        "-l",
+        "0",
+        "-t"
+    ],
+    "ptt_off_command": [
+        "/opt/build/sdrangel/scriptsapi/venv/bin/python",
+        "/opt/build/sdrangel/scriptsapi/ptt_feature.py",
+        "-a",
+        "192.168.0.3:8092",
+        "-p",
+        "1",
+        "-l",
+        "0"
+    ],
+    "ptt_off_delay": 2,
+    "logging_level": "debug"
+}

@@ -1,21 +1,25 @@
 #!/usr/bin/env python
 """
-TITLE:  abot
-AUTHOR: Ranomier (ranomier@fragomat.net)
-DESC:   a simple bot that receives sound from a sound device (for me jack audio kit)
+TITLE:  mumblestream
+AUTHOR: Ranomier (ranomier@fragomat.net), F4EXB (f4exb06@gmail.com)
+DESC:   A bot that streams host audio to/from a Mumble server.
 """
 
 import argparse
 import sys
-from threading import Thread
+import os
+from threading import Thread, current_thread
 from time import sleep
+import json
 import collections
 #from pprint import pprint
 #import warnings
 
-from thrd_party import pymumble
+import pymumble_py3 as pymumble
 import pyaudio
-__version__ = "0.0.9"
+import numpy as np
+
+__version__ = "0.1.0"
 
 class Status(collections.UserList):
     def __init__(self, runner_obj):
@@ -24,6 +28,7 @@ class Status(collections.UserList):
         super().__init__(self.__gather_status())
 
     def __gather_status(self):
+        """ Gather status """
         result = []
         for meta in self.__runner_obj.values():
             result.append(self.scheme(meta["process"].name,
@@ -39,7 +44,7 @@ class Status(collections.UserList):
 
 
 class Runner(collections.UserDict):
-    """ TODO """
+    """ Runs a list of threads """
     def __init__(self, run_dict, args_dict=None):
         self.is_ready = False
         super().__init__(run_dict)
@@ -47,7 +52,7 @@ class Runner(collections.UserDict):
         self.run()
 
     def change_args(self, args_dict):
-        """ TODO """
+        """ Copy arguments """
         for name in self.keys():
             if name in args_dict:
                 self[name]["args"] = args_dict[name]["args"]
@@ -58,7 +63,7 @@ class Runner(collections.UserDict):
 
 
     def run(self):
-        """ TODO """
+        """ Spawns threads """
         for name, cdict in self.items():
             print("[run] generating process for:", name)
             self[name]["process"] = Thread(name=name,
@@ -66,63 +71,83 @@ class Runner(collections.UserDict):
                                            args=cdict["args"],
                                            kwargs=cdict["kwargs"])
             print("[run] starting process for:", name)
+            self[name]["process"].daemon = True
             self[name]["process"].start()
             print("[run] ", name, "started")
         print("[run] all done")
         self.is_ready = True
 
     def status(self):
-        """ TODO """
+        """ Return a status """
         if self.is_ready:
             return Status(self)
         else:
             return list()
 
     def stop(self, name=""):
+        """ Stop and exit """
         raise NotImplementedError("Sorry")
 
 
 class MumbleRunner(Runner):
+    """ A threads runner for Mumble """
     def __init__(self, mumble_object, args_dict):
         self.mumble = mumble_object
         super().__init__(self._config(), args_dict)
 
     def _config(self):
+        """ Initial configuration """
         raise NotImplementedError("please inherit and implement")
 
 
 class Audio(MumbleRunner):
+    """ Audio input/output """
     def _config(self):
+        """ Initial configuration """
         return {"input": {"func": self.__input_loop, "process": None},
                 "output": {"func": self.__output_loop, "process": None}}
 
-    def calculate_volume(self, thread_name):
-        """ TODO """
-        try:
-            dbel = self[thread_name]["db"]
-            self["vol_vector"] = 10 ** (dbel/20)
-        except KeyError:
-            self["vol_vector"] = 1
+    def __level(self, audio_bytes):
+        """ Return maximum signal chunk magnitude """
+        alldata = bytearray()
+        alldata.extend(audio_bytes)
+        data = np.frombuffer(alldata, dtype=np.short)
+        return max(abs(data))
 
-
-    def __output_loop(self, periodsize):
-        """ TODO """
-        del periodsize
+    def __output_loop(self, packet_length, config):
+        """ Output process """
+        del packet_length
         return None
 
-    def __input_loop(self, periodsize):
-        """ TODO """
+    def __input_loop(self, packet_length, config):
+        """ Input process """
+        name = current_thread().name
         p_in = pyaudio.PyAudio()
-        stream = p_in.open(input=True,
-                           channels=1,
-                           format=pyaudio.paInt16,
-                           rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
-                           frames_per_buffer=periodsize)
-        while True:
-            data = stream.read(periodsize)
-            self.mumble.sound_output.add_sound(data)
-        stream.close()
-        return True
+        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
+        stream = p_in.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
+            input=True,
+            frames_per_buffer=chunk_size
+        )
+        try:
+            while True:
+                data = stream.read(chunk_size)
+                if self.__level(data) > config["audio_threshold"]:
+                    print(f"[{name}] Audio on")
+                    quiet_samples = 0
+                    while quiet_samples < (config["vox_silence_time"] * (1 / packet_length)):
+                        self.mumble.sound_output.add_sound(data)
+                        data = stream.read(chunk_size)
+                        if self.__level(data) < config["audio_threshold"]:
+                            quiet_samples = quiet_samples + 1
+                        else:
+                            quiet_samples = 0
+                    print(f"[{name}] Audio off")
+        finally:
+            stream.close()
+            return True
 
     def input_vol(self, dbint):
         pass
@@ -132,14 +157,15 @@ class AudioPipe(MumbleRunner):
         return {"PipeInput": {"func": self.__input_loop, "process": None},
                 "PipeOutput": {"func": self.__output_loop, "process": None}}
 
-    def __output_loop(self, periodsize):
+    def __output_loop(self, packet_length):
         return None
 
-    def __input_loop(self, periodsize, path):
+    def __input_loop(self, packet_length, path):
+        ckunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
         while True:
             with open(path) as fifo_fd:
                 while True:
-                    data = fifo_fd.read(periodsize)
+                    data = fifo_fd.read(ckunk_size)
                     self.mumble.sound_output.add_sound(data)
 
 
@@ -150,7 +176,11 @@ def prepare_mumble(host, user, password="", certfile=None,
                    codec_profile="audio", bandwidth=96000, channel=None):
     """Will configure the pymumble object and return it"""
 
-    abot = pymumble.Mumble(host, user, certfile=certfile, password=password)
+    try:
+        abot = pymumble.Mumble(host, user, certfile=certfile, password=password)
+    except Exception as ex:
+        print(f"Cannot commect to {host}: {ex}")
+        return None
 
     abot.set_application_string("abot (%s)" % __version__)
     abot.set_codec_profile(codec_profile)
@@ -164,8 +194,27 @@ def prepare_mumble(host, user, password="", certfile=None,
             print("Tried to connect to channel:", "'" + channel + "'. ", "Got this Error:")
             print("Available Channels:")
             print(abot.channels)
-            sys.exit(1)
+            return None
     return abot
+
+def get_config(args):
+    """ Get parameters from the optional config file """
+    config = {}
+
+    if args.config_path is not None and os.path.exists(args.config_path):
+        with open(args.config_path) as f:
+            configdata = json.load(f)
+    else:
+        configdata = {}
+
+    config["vox_silence_time"] = configdata.get("vox_silence_time", 3)
+    config["audio_threshold"] = configdata.get("audio_threshold", 1000)
+    config["ptt_on_command"] = configdata.get("ptt_on_command")
+    config["ptt_off_command"] = configdata.get("ptt_off_command")
+    config["ptt_off_delay"] =  configdata.get("ptt_off_delay", 2)
+    config["ptt_command_support"] = not (config["ptt_on_command"] is None or config["ptt_off_command"] is None)
+    config["logging_level"] = configdata.get("logging_level", "warning")
+    return config
 
 
 def main(preserve_thread=True):
@@ -180,10 +229,10 @@ def main(preserve_thread=True):
     parser.add_argument("-p", "--password", dest="password", type=str, default="",
                         help="Password if server requires one")
 
-    parser.add_argument("-s", "--setperiodsize", dest="periodsize", type=int, default=256,
-                        help="Lower values mean less delay. WARNING:Lower values could be unstable")
+    parser.add_argument("-s", "--setpacketlength", dest="packet_length", type=int, default=pymumble.constants.PYMUMBLE_AUDIO_PER_PACKET,
+                        help="Length of audio packet in seconds. Lower values mean less delay. Default 0.02 WARNING:Lower values could be unstable")
 
-    parser.add_argument("-b", "--bandwidth", dest="bandwidth", type=int, default=96000,
+    parser.add_argument("-b", "--bandwidth", dest="bandwidth", type=int, default=48000,
                         help="Bandwith of the bot (in bytes/s). Default=96000")
 
     parser.add_argument("-c", "--certificate", dest="certfile", type=str, default=None,
@@ -195,29 +244,45 @@ def main(preserve_thread=True):
     parser.add_argument("-f", "--fifo", dest="fifo_path", type=str, default=None,
                         help="Read from FIFO (EXPERMENTAL)")
 
-    args = parser.parse_args()
+    parser.add_argument("--config", dest="config_path", type=str, default="config.json",
+                        help="Configuration file")
 
+    args = parser.parse_args()
+    config = get_config(args)
+    args.config = config
 
     abot = prepare_mumble(args.host, args.user, args.password, args.certfile,
                           "audio", args.bandwidth, args.channel)
+
+    if abot is None:
+        print("Cannot connect to Mumble server or channel")
+        sys.exit(1)
+
     if args.fifo_path:
-        audio = AudioPipe(abot, {"output": {"args": (args.periodsize, ),
+        audio = AudioPipe(abot, {"output": {"args": (args.packet_length, ),
                                             "kwargs": None},
-                                 "input": {"args": (args.periodsize, args.fifo_path),
+                                 "input": {"args": (args.packet_length, args.fifo_path),
                                            "kwargs": None}
                                 }
                          )
     else:
-        audio = Audio(abot, {"output": {"args": (args.periodsize, ),
+        audio = Audio(abot, {"output": {"args": (args.packet_length, args.config),
                                         "kwargs": None},
-                             "input": {"args": (args.periodsize, ),
+                             "input": {"args": (args.packet_length, args.config),
                                        "kwargs": None}
                             }
                      )
     if preserve_thread:
         while True:
-            print(audio.status())
-            sleep(60)
+            try:
+                print(audio.status())
+                sleep(60)
+            except KeyboardInterrupt:
+                print("Terminating")
+                return 0
+            except Exception as ex:
+                print(f"Error {ex}")
+                return 1
 
 if __name__ == "__main__":
     sys.exit(main())

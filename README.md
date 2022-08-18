@@ -1,57 +1,79 @@
-# pymumble-abot
-A bot that creates an input stream on your local system and streams that to a Mumble server.
+# Mumblestream
+A bot that streams host audio to/from a Mumble server.
 
 The bot uses PortAudio which works together with Jack, ALSA, OSS, PulseAudio, WASAPI, and more.
 
 It uses the [pymumble library](https://github.com/azlux/pymumble).
 
+It is a fork of [pymumble-abot](https://github.com/ranomier/pymumble-abot).
+
 ## Features
-* Set bandwidth in bytes/s. Default is 50000 bytes/s
+* Set bandwidth in bytes/s. Default is 48000 bytes/s
 * Ability to use certificates
-* See ./abot.py --help
+* See ./mumblestream.py --help
 
 ## Bugs and Features
-* See https://github.com/ranomier/pymumble-abot/issues
+* See https://github.com/f4exb/mumblestream/issues
 
 ## Dependencies
 ### Python libraries
+See requirements.txt:
 * opuslib (Opus codec)
+* google (for Google Protocol Buffers)
 * protobuf-py3 (Google Protocol Buffers)
 * pyaudio (PortAudio)
+* pymumble
+* numpy
 
 ## Installation
-### Method 1: Install on Linux with virtualenv
-Login as a user; do not execute the following commands as root :)
+### Install on Linux with virtualenv
+Login as a user; do not execute the following commands as root :) of course... but always worth to mention.
 
-	virtualenv ~/python-for-pymumble-abot
-	source ~/python-for-pymumble-abot/bin/activate
+    cd
+	git https://github.com/f4exb/mumblestream.git
+	cd mumblestream
 
-	pip install opuslib google protobuf-py3 pyaudio
-	cd
+	python -m venv venv
+	source venv/bin/activate
 
-	git clone git@github.com:ranomier/pymumble-abot.git
-	cd pymumble-abot
-	git submodule init
-	git submodule update
+	pip install -r requirements.txt
+
 
 Now you can run your own bot :)
 
-## Usage
-First you need to activate your Python environment:
+## Configuration file
 
-	source ~/python-for-pymumble-abot/bin/activate
+You will need a configuration file to further customize your `mumblestream` instance. However this file is not mandatory as all parameters are optional. It is in the form of a JSON file with the following parameters defined as keys:
+
+- `vox_silence_time`: Time in seconds of detected silence before streaming stops. Default: 3
+- `audio_threshold`: Audio detected above this level will be streamed. Default: 1000
+- `audio_output_volume` Volume factor applied to audio coming from Mumble
+- `ptt_on_command`: Optional command to execute to turn host PTT on when receiving audio from Zello. It is in the form of a list of command followed by its arguments
+- `ptt_off_command`: Optional command to execute to turn host PTT off when audio from Zello has finished. It is in the form of a list of command followed by its arguments
+- `ptt_off_delay`: Delay in seconds applied before sending the PTT off command. Covers possible delay to play the stream entirely. Default 2 seconds.
+- `logging_level`: Set Python logging module to this level. Can be "critial", "error", "warning", "info" or "debug". Default "warning".
+
+`ptt_on_command` and `ptt_off_command` parameters are required for the PTT feature to be engaged.
+
+You will find an example `sampleconfig.json` file in this repository
+
+## Typical usage
+First you need to activate your Python environment
+
+    cd ~/mumblestream
+    source venv/bin/activate
 
 Then you can run your bot:
 
-	cd ~/pymumble-abot
-	./abot.py --host hostname_of_server -u "choose_username" -p "your_password"
+	./mumblestream.py -H [your host] -u [your user] -p [your password] -C [target channel] -c [path to .pem certificate]
 
 Be aware that most Mumble servers do not allow spaces or other special characters for user names.
+Also a certificate is usually mandatory (see "Certificate" section next)
 
 ## Bandwidth
-The bot uses TCP mode which causes some (more) overhead in bandwidth compared to UDP mode. Note, that all Mumble bots do that; but keep that in mind when you set the bitrate on your server.
+The bot uses TCP mode which causes some (more) overhead in bandwidth compared to UDP mode. Note, that all Mumble bots do that; but keep that in mind when you set the bitrate on your server. Expect a ~25% increase.
 
-So when you set your bot to 96000 bytes/s it will use ~120000 bytes/s.
+For example when you set your bot to 96000 bytes/s it will use ~120000 bytes/s.
 
 ## Certificate
 Export your certificate from the Mumble client with the "Certificate wizard". Then convert it with openssl:

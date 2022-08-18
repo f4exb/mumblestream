@@ -1,0 +1,6 @@
+opuslib
+google
+protobuf-py3
+pyaudio
+pymumble
+numpy

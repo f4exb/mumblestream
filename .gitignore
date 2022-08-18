@@ -93,5 +93,7 @@ ENV/
 .*.swo
 .*.swn
 
-# should not included 
+# should not included
 certificates/*
+cert.pem
+config.json
