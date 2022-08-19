@@ -10,16 +10,19 @@ import sys
 import os
 from threading import Thread, current_thread
 from time import sleep
+import logging
 import json
 import collections
-#from pprint import pprint
-#import warnings
 
 import pymumble_py3 as pymumble
 import pyaudio
 import numpy as np
 
 __version__ = "0.1.0"
+
+logging.basicConfig(format='%(asctime)s %(levelname).1s [%(threadName)s] %(funcName)s: %(message)s', level=logging.INFO)
+LOG = logging.getLogger('Mumblestream')
+
 
 class Status(collections.UserList):
     def __init__(self, runner_obj):
@@ -38,7 +41,7 @@ class Status(collections.UserList):
     def __repr__(self):
         repr_str = ""
         for status in self:
-            repr_str += "[%s] alive: %s\n" % (status.name, status.alive)
+            repr_str += "[%s] alive: %s " % (status.name, status.alive)
         return repr_str
 
 
@@ -65,16 +68,16 @@ class Runner(collections.UserDict):
     def run(self):
         """ Spawns threads """
         for name, cdict in self.items():
-            print("[run] generating process for:", name)
+            LOG.info("generating process")
             self[name]["process"] = Thread(name=name,
                                            target=cdict["func"],
                                            args=cdict["args"],
                                            kwargs=cdict["kwargs"])
-            print("[run] starting process for:", name)
+            LOG.info("starting process")
             self[name]["process"].daemon = True
             self[name]["process"].start()
-            print("[run] ", name, "started")
-        print("[run] all done")
+            LOG.info("%s started", name)
+        LOG.info("all done")
         self.is_ready = True
 
     def status(self):
@@ -121,7 +124,6 @@ class Audio(MumbleRunner):
 
     def __input_loop(self, packet_length, config):
         """ Input process """
-        name = current_thread().name
         p_in = pyaudio.PyAudio()
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
         stream = p_in.open(
@@ -135,7 +137,7 @@ class Audio(MumbleRunner):
             while True:
                 data = stream.read(chunk_size)
                 if self.__level(data) > config["audio_threshold"]:
-                    print(f"[{name}] Audio on")
+                    LOG.debug("audio on")
                     quiet_samples = 0
                     while quiet_samples < (config["vox_silence_time"] * (1 / packet_length)):
                         self.mumble.sound_output.add_sound(data)
@@ -144,7 +146,7 @@ class Audio(MumbleRunner):
                             quiet_samples = quiet_samples + 1
                         else:
                             quiet_samples = 0
-                    print(f"[{name}] Audio off")
+                    LOG.debug("audio off")
         finally:
             stream.close()
             return True
@@ -179,7 +181,7 @@ def prepare_mumble(host, user, password="", certfile=None,
     try:
         abot = pymumble.Mumble(host, user, certfile=certfile, password=password)
     except Exception as ex:
-        print(f"Cannot commect to {host}: {ex}")
+        LOG.error("cannot commect to %s: %s", host, ex)
         return None
 
     abot.set_application_string("abot (%s)" % __version__)
@@ -190,10 +192,10 @@ def prepare_mumble(host, user, password="", certfile=None,
     if channel:
         try:
             abot.channels.find_by_name(channel).move_in()
-        except pymumble.channels.UnknownChannelError:
-            print("Tried to connect to channel:", "'" + channel + "'. ", "Got this Error:")
-            print("Available Channels:")
-            print(abot.channels)
+        except pymumble.channels.UnknownChannelError as ex:
+            LOG.warnint("tried to connect to channel: '%s' exception %s", channel, ex)
+            LOG.info("Available Channels:")
+            LOG.info(abot.channels)
             return None
     return abot
 
@@ -251,11 +253,14 @@ def main(preserve_thread=True):
     config = get_config(args)
     args.config = config
 
+    log_level = logging.getLevelName(config["logging_level"].upper())
+    LOG.setLevel(log_level)
+
     abot = prepare_mumble(args.host, args.user, args.password, args.certfile,
                           "audio", args.bandwidth, args.channel)
 
     if abot is None:
-        print("Cannot connect to Mumble server or channel")
+        LOG.critical("cannot connect to Mumble server or channel")
         sys.exit(1)
 
     if args.fifo_path:
@@ -275,16 +280,14 @@ def main(preserve_thread=True):
     if preserve_thread:
         while True:
             try:
-                print(audio.status())
+                LOG.info(audio.status())
                 sleep(60)
             except KeyboardInterrupt:
-                print("Terminating")
+                LOG.info("terminating")
                 return 0
             except Exception as ex:
-                print(f"Error {ex}")
+                LOG.error("exception %s", ex)
                 return 1
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
