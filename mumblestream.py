@@ -53,9 +53,10 @@ class Runner(collections.UserDict):
     """ Runs a list of threads """
     def __init__(self, run_dict, args_dict=None):
         self.is_ready = False
-        super().__init__(run_dict)
-        self.change_args(args_dict)
-        self.run()
+        if run_dict is not None:
+            super().__init__(run_dict)
+            self.change_args(args_dict)
+            self.run()
 
     def change_args(self, args_dict):
         """ Copy arguments """
@@ -111,22 +112,58 @@ class Audio(MumbleRunner):
     """ Audio input/output """
     def _config(self):
         """ Initial configuration """
+        if not self.__init_audio():
+            return None
         self.in_user = None
         self.receive_ts = None
-        self.stream_out = None
         self.in_running = None
         self.out_running = None
         self.out_volume = 1
         self.ptt_on_command = None
-        self.input_device_names, self.output_device_names = self.__scan_devices()
-        self.pulse = PulseAudioHandler('mumblestream')
         return {"input": {"func": self.__input_loop, "process": None},
                 "output": {"func": self.__output_loop, "process": None}}
 
-    @staticmethod
-    def __scan_devices():
-        """ Scan audio devices handled by PyAudio """
+    def __init_audio(self):
         p = pyaudio.PyAudio()
+        if "input_pulse_name" in self.config or "output_pulse_name" in self.config:
+            pulse = PulseAudioHandler('mumblestream')
+        input_device_names, output_device_names = self.__scan_devices(p)
+        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
+        pyaudio_output_index = self.__get_pyaudio_output_index(output_device_names)
+        if pyaudio_output_index is None:
+            LOG.error("cannot find PyAudio output device")
+            return False
+        self.stream_out = p.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
+            output=True,
+            frames_per_buffer=chunk_size,
+            output_device_index=pyaudio_output_index
+        )
+        LOG.debug("output stream opened")
+        if "output_pulse_name" in self.config: # redirect output from mumblestream with pulseaudio
+            self.__move_output_pulseaudio(pulse, self.config["output_pulse_name"])
+        pyaudio_input_index = self.__get_pyaudio_input_index(input_device_names)
+        if pyaudio_input_index is None:
+            LOG.error("cannot find PyAudio input device")
+            return False
+        self.stream_in = p.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
+            input=True,
+            frames_per_buffer=chunk_size,
+            input_device_index=pyaudio_input_index
+        )
+        LOG.debug("input stream opened")
+        if "input_pulse_name" in self.config: # redirect input to mumblestream with pulseaudio
+            self.__move_input_pulseaudio(pulse, self.config["input_pulse_name"])
+        return True
+
+    @staticmethod
+    def __scan_devices(p):
+        """ Scan audio devices handled by PyAudio """
         info = p.get_host_api_info_by_index(0)
         numdevices = info.get('deviceCount')
         input_device_names = {}
@@ -142,26 +179,26 @@ class Audio(MumbleRunner):
         LOG.debug("output: %s", output_device_names)
         return input_device_names, output_device_names
 
-    def __get_pyaudio_input_index(self):
+    def __get_pyaudio_input_index(self, input_device_names):
         """ Returns the PyAudio index of input device or None if no default """
         if "input_pulse_name" in self.config:
             pyaudio_name = "pulse"
         else:
             pyaudio_name = self.config.get("input_pyaudio_name", "default")
-        return self.input_device_names.get(pyaudio_name)
+        return input_device_names.get(pyaudio_name)
 
-    def __get_pyaudio_output_index(self):
+    def __get_pyaudio_output_index(self, output_device_names):
         """ Returns the PyAudio index of output device or None if no default """
         if "output_pulse_name" in self.config:
             pyaudio_name = "pulse"
         else:
             pyaudio_name = self.config.get("output_pyaudio_name", "default")
-        return self.output_device_names.get(pyaudio_name)
+        return output_device_names.get(pyaudio_name)
 
-    def __move_input_pulseaudio(self, input_pulse_name):
+    def __move_input_pulseaudio(self, pulse, input_pulse_name):
         """ Moves the input to the given pulseaudio device """
-        pulse_source_index = self.pulse.get_source_index(input_pulse_name)
-        pulse_source_output_index = self.pulse.get_own_source_output_index()
+        pulse_source_index = pulse.get_source_index(input_pulse_name)
+        pulse_source_output_index = pulse.get_own_source_output_index()
         if pulse_source_index is None or pulse_source_output_index is None:
             LOG.warning(
                 "cannot move source output %d to source %d",
@@ -170,7 +207,7 @@ class Audio(MumbleRunner):
             )
         else:
             try:
-                self.pulse.move_source_output(pulse_source_output_index, pulse_source_index)
+                pulse.move_source_output(pulse_source_output_index, pulse_source_index)
                 LOG.debug(
                     "moved pulseaudio source output %d to source %d",
                     pulse_source_output_index,
@@ -179,10 +216,10 @@ class Audio(MumbleRunner):
             except Exception as ex:
                 LOG.error("exception assigning pulseaudio source: %s", ex)
 
-    def __move_output_pulseaudio(self, output_pulse_name):
+    def __move_output_pulseaudio(self, pulse, output_pulse_name):
         """ Moves the output to the given pulseaudio device """
-        pulse_sink_index = self.pulse.get_sink_index(output_pulse_name)
-        pulse_sink_input_index = self.pulse.get_own_sink_input_index()
+        pulse_sink_index = pulse.get_sink_index(output_pulse_name)
+        pulse_sink_input_index = pulse.get_own_sink_input_index()
         if pulse_sink_index is None or pulse_sink_input_index is None:
             LOG.warning(
                 "cannot move pulseaudio sink input %d to sink %d",
@@ -191,7 +228,7 @@ class Audio(MumbleRunner):
             )
         else:
             try:
-                self.pulse.move_sink_input(pulse_sink_input_index, pulse_sink_index)
+                pulse.move_sink_input(pulse_sink_input_index, pulse_sink_index)
                 LOG.debug(
                     "moved pulseaudio sink input %d to sink %d",
                     pulse_sink_input_index,
@@ -226,21 +263,6 @@ class Audio(MumbleRunner):
         """ Output process """
         self.out_volume = self.config["audio_output_volume"]
         self.ptt_on_command = " ".join(self.config["ptt_on_command"]) if self.config["ptt_command_support"] else None
-        p_out = pyaudio.PyAudio()
-        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
-        pyaudio_output_index = self.__get_pyaudio_output_index()
-        if pyaudio_output_index is None:
-            LOG.error("cannot find PyAudio output device")
-            return False
-        self.stream_out = p_out.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
-            output=True,
-            frames_per_buffer=chunk_size,
-            output_device_index=pyaudio_output_index
-        )
-        LOG.debug("output stream opened")
         self.out_running = True
         try:
             self.mumble.callbacks.set_callback(CLBK_SOUNDRECEIVED, self.__sound_received_handler)
@@ -263,31 +285,17 @@ class Audio(MumbleRunner):
 
     def __input_loop(self):
         """ Input process """
-        p_in = pyaudio.PyAudio()
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
-        pyaudio_input_index = self.__get_pyaudio_input_index()
-        if pyaudio_input_index is None:
-            LOG.error("cannot find PyAudio input device")
-            return False
-        stream = p_in.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
-            input=True,
-            frames_per_buffer=chunk_size,
-            input_device_index=pyaudio_input_index
-        )
-        LOG.debug("input stream opened")
         self.in_running = True
         try:
             while self.in_running:
-                data = stream.read(chunk_size)
+                data = self.stream_in.read(chunk_size)
                 if self.__level(data) > self.config["audio_threshold"]:
                     LOG.debug("audio on")
                     quiet_samples = 0
                     while quiet_samples < (self.config["vox_silence_time"] * (1 / self.config["args"].packet_length)):
                         self.mumble.sound_output.add_sound(data)
-                        data = stream.read(chunk_size)
+                        data = self.stream_in.read(chunk_size)
                         if self.__level(data) < self.config["audio_threshold"]:
                             quiet_samples = quiet_samples + 1
                         else:
@@ -295,7 +303,7 @@ class Audio(MumbleRunner):
                     LOG.debug("audio off")
         finally:
             LOG.debug("terminating")
-            stream.close()
+            self.stream_in.close()
             LOG.debug("input stream closed")
             return True
 
