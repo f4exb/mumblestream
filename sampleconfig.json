@@ -23,6 +23,5 @@
         "-l",
         "0"
     ],
-    "ptt_off_delay": 2,
     "logging_level": "debug"
 }

@@ -47,10 +47,9 @@ You will need a configuration file to further customize your `mumblestream` inst
 
 - `vox_silence_time`: Time in seconds of detected silence before streaming stops. Default: 3
 - `audio_threshold`: Audio detected above this level will be streamed. Default: 1000
-- `audio_output_volume` Volume factor applied to audio coming from Mumble
+- `audio_output_volume` Volume factor applied to audio coming from Mumble. Default: 1
 - `ptt_on_command`: Optional command to execute to turn host PTT on when receiving audio from Zello. It is in the form of a list of command followed by its arguments
 - `ptt_off_command`: Optional command to execute to turn host PTT off when audio from Zello has finished. It is in the form of a list of command followed by its arguments
-- `ptt_off_delay`: Delay in seconds applied before sending the PTT off command. Covers possible delay to play the stream entirely. Default 2 seconds.
 - `logging_level`: Set Python logging module to this level. Can be "critial", "error", "warning", "info" or "debug". Default "warning".
 
 `ptt_on_command` and `ptt_off_command` parameters are required for the PTT feature to be engaged.
