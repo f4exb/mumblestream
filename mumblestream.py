@@ -97,8 +97,9 @@ class Runner(collections.UserDict):
 
 class MumbleRunner(Runner):
     """ A threads runner for Mumble """
-    def __init__(self, mumble_object, args_dict):
+    def __init__(self, mumble_object, config, args_dict):
         self.mumble = mumble_object
+        self.config = config
         super().__init__(self._config(), args_dict)
 
     def _config(self):
@@ -141,20 +142,20 @@ class Audio(MumbleRunner):
         LOG.debug("output: %s", output_device_names)
         return input_device_names, output_device_names
 
-    def __get_pyaudio_input_index(self, config):
+    def __get_pyaudio_input_index(self):
         """ Returns the PyAudio index of input device or None if no default """
-        if "input_pulse_name" in config:
+        if "input_pulse_name" in self.config:
             pyaudio_name = "pulse"
         else:
-            pyaudio_name = config.get("input_pyaudio_name", "default")
+            pyaudio_name = self.config.get("input_pyaudio_name", "default")
         return self.input_device_names.get(pyaudio_name)
 
-    def __get_pyaudio_output_index(self, config):
+    def __get_pyaudio_output_index(self):
         """ Returns the PyAudio index of output device or None if no default """
-        if "output_pulse_name" in config:
+        if "output_pulse_name" in self.config:
             pyaudio_name = "pulse"
         else:
-            pyaudio_name = config.get("output_pyaudio_name", "default")
+            pyaudio_name = self.config.get("output_pyaudio_name", "default")
         return self.output_device_names.get(pyaudio_name)
 
     def __move_input_pulseaudio(self, input_pulse_name):
@@ -221,13 +222,13 @@ class Audio(MumbleRunner):
             np_audio = (np_audio * self.out_volume).astype(np.short)
             self.stream_out.write(np_audio.tobytes())
 
-    def __output_loop(self, packet_length, config):
+    def __output_loop(self):
         """ Output process """
-        self.out_volume = config["audio_output_volume"]
-        self.ptt_on_command = " ".join(config["ptt_on_command"]) if config["ptt_command_support"] else None
+        self.out_volume = self.config["audio_output_volume"]
+        self.ptt_on_command = " ".join(self.config["ptt_on_command"]) if self.config["ptt_command_support"] else None
         p_out = pyaudio.PyAudio()
-        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
-        pyaudio_output_index = self.__get_pyaudio_output_index(config)
+        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
+        pyaudio_output_index = self.__get_pyaudio_output_index()
         if pyaudio_output_index is None:
             LOG.error("cannot find PyAudio output device")
             return False
@@ -246,8 +247,8 @@ class Audio(MumbleRunner):
             while self.out_running:
                 if self.receive_ts is not None and time.time() > self.receive_ts + 1:
                     LOG.debug("stop receiving from %s", self.in_user)
-                    if config["ptt_command_support"]: # PTT off
-                        ptt_off_command = " ".join(config["ptt_off_command"])
+                    if self.config["ptt_command_support"]: # PTT off
+                        ptt_off_command = " ".join(self.config["ptt_off_command"])
                         run_ptt_off_command = subprocess.run(ptt_off_command , shell=True)
                         LOG.debug("PTT off exited with code %d", run_ptt_off_command.returncode)
                     self.receive_ts = None
@@ -260,11 +261,11 @@ class Audio(MumbleRunner):
             LOG.debug("output stream closed")
             return True
 
-    def __input_loop(self, packet_length, config):
+    def __input_loop(self):
         """ Input process """
         p_in = pyaudio.PyAudio()
-        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
-        pyaudio_input_index = self.__get_pyaudio_input_index(config)
+        chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
+        pyaudio_input_index = self.__get_pyaudio_input_index()
         if pyaudio_input_index is None:
             LOG.error("cannot find PyAudio input device")
             return False
@@ -281,13 +282,13 @@ class Audio(MumbleRunner):
         try:
             while self.in_running:
                 data = stream.read(chunk_size)
-                if self.__level(data) > config["audio_threshold"]:
+                if self.__level(data) > self.config["audio_threshold"]:
                     LOG.debug("audio on")
                     quiet_samples = 0
-                    while quiet_samples < (config["vox_silence_time"] * (1 / packet_length)):
+                    while quiet_samples < (self.config["vox_silence_time"] * (1 / self.config["args"].packet_length)):
                         self.mumble.sound_output.add_sound(data)
                         data = stream.read(chunk_size)
-                        if self.__level(data) < config["audio_threshold"]:
+                        if self.__level(data) < self.config["audio_threshold"]:
                             quiet_samples = quiet_samples + 1
                         else:
                             quiet_samples = 0
@@ -406,7 +407,7 @@ def main(preserve_thread=True):
 
     args = parser.parse_args()
     config = get_config(args)
-    args.config = config
+    config["args"] = args
 
     log_level = logging.getLevelName(config["logging_level"].upper())
     LOG.setLevel(log_level)
@@ -419,19 +420,35 @@ def main(preserve_thread=True):
         sys.exit(1)
 
     if args.fifo_path:
-        audio = AudioPipe(mumble, {"output": {"args": (args.packet_length, ),
-                                            "kwargs": None},
-                                 "input": {"args": (args.packet_length, args.fifo_path),
-                                           "kwargs": None}
-                                }
-                         )
+        audio = AudioPipe(
+            mumble,
+            config,
+            {
+                "output": {
+                    "args": (args.packet_length, ),
+                    "kwargs": None
+                },
+                "input": {
+                    "args": (args.packet_length, args.fifo_path),
+                    "kwargs": None
+                }
+            }
+        )
     else:
-        audio = Audio(mumble, {"output": {"args": (args.packet_length, args.config),
-                                        "kwargs": None},
-                             "input": {"args": (args.packet_length, args.config),
-                                       "kwargs": None}
-                            }
-                     )
+        audio = Audio(
+            mumble,
+            config,
+            {
+                "output": {
+                    "args": [],
+                    "kwargs": None
+                },
+                "input": {
+                    "args": [],
+                    "kwargs": None
+                }
+            }
+        )
     if preserve_thread:
         while True:
             try:
