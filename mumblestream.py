@@ -20,6 +20,8 @@ from pymumble_py3.callbacks import PYMUMBLE_CLBK_SOUNDRECEIVED as CLBK_SOUNDRECE
 import pyaudio
 import numpy as np
 
+from pulseaudio import PulseAudioHandler
+
 __version__ = "0.1.0"
 
 logging.basicConfig(format='%(asctime)s %(levelname).1s [%(threadName)s] %(funcName)s: %(message)s', level=logging.INFO)
@@ -45,7 +47,6 @@ class Status(collections.UserList):
         for status in self:
             repr_str += "[%s] alive: %s " % (status.name, status.alive)
         return repr_str
-
 
 
 class Runner(collections.UserDict):
@@ -117,11 +118,13 @@ class Audio(MumbleRunner):
         self.out_volume = 1
         self.ptt_on_command = None
         self.input_device_names, self.output_device_names = self.__scan_devices()
+        self.pulse = PulseAudioHandler('mumblestream')
         return {"input": {"func": self.__input_loop, "process": None},
                 "output": {"func": self.__output_loop, "process": None}}
 
     @staticmethod
     def __scan_devices():
+        """ Scan audio devices handled by PyAudio """
         p = pyaudio.PyAudio()
         info = p.get_host_api_info_by_index(0)
         numdevices = info.get('deviceCount')
@@ -138,6 +141,64 @@ class Audio(MumbleRunner):
         LOG.debug("output: %s", output_device_names)
         return input_device_names, output_device_names
 
+    def __get_pyaudio_input_index(self, config):
+        """ Returns the PyAudio index of input device or None if no default """
+        if "input_pulse_name" in config:
+            pyaudio_name = "pulse"
+        else:
+            pyaudio_name = config.get("input_pyaudio_name", "default")
+        return self.input_device_names.get(pyaudio_name)
+
+    def __get_pyaudio_output_index(self, config):
+        """ Returns the PyAudio index of output device or None if no default """
+        if "output_pulse_name" in config:
+            pyaudio_name = "pulse"
+        else:
+            pyaudio_name = config.get("output_pyaudio_name", "default")
+        return self.output_device_names.get(pyaudio_name)
+
+    def __move_input_pulseaudio(self, input_pulse_name):
+        """ Moves the input to the given pulseaudio device """
+        pulse_source_index = self.pulse.get_source_index(input_pulse_name)
+        pulse_source_output_index = self.pulse.get_own_source_output_index()
+        if pulse_source_index is None or pulse_source_output_index is None:
+            LOG.warning(
+                "cannot move source output %d to source %d",
+                pulse_source_output_index,
+                pulse_source_index
+            )
+        else:
+            try:
+                self.pulse.move_source_output(pulse_source_output_index, pulse_source_index)
+                LOG.debug(
+                    "moved pulseaudio source output %d to source %d",
+                    pulse_source_output_index,
+                    pulse_source_index
+                )
+            except Exception as ex:
+                LOG.error("exception assigning pulseaudio source: %s", ex)
+
+    def __move_output_pulseaudio(self, output_pulse_name):
+        """ Moves the output to the given pulseaudio device """
+        pulse_sink_index = self.pulse.get_sink_index(output_pulse_name)
+        pulse_sink_input_index = self.pulse.get_own_sink_input_index()
+        if pulse_sink_index is None or pulse_sink_input_index is None:
+            LOG.warning(
+                "cannot move pulseaudio sink input %d to sink %d",
+                pulse_sink_input_index,
+                pulse_sink_index
+            )
+        else:
+            try:
+                self.pulse.move_sink_input(pulse_sink_input_index, pulse_sink_index)
+                LOG.debug(
+                    "moved pulseaudio sink input %d to sink %d",
+                    pulse_sink_input_index,
+                    pulse_sink_index
+                )
+            except Exception as ex:
+                LOG.error("exception assigning pulseaudio sink: %s", ex)
+
     @staticmethod
     def __level(audio_bytes):
         """ Return maximum signal chunk magnitude """
@@ -147,6 +208,7 @@ class Audio(MumbleRunner):
         return max(abs(data))
 
     def __sound_received_handler(self, user, soundchunk):
+        """ Pymumble sound received callback """
         if self.in_user is None:
             LOG.debug("start receiving from %s", user["name"])
             self.in_user = user["name"]
@@ -165,13 +227,17 @@ class Audio(MumbleRunner):
         self.ptt_on_command = " ".join(config["ptt_on_command"]) if config["ptt_command_support"] else None
         p_out = pyaudio.PyAudio()
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
+        pyaudio_output_index = self.__get_pyaudio_output_index(config)
+        if pyaudio_output_index is None:
+            LOG.error("cannot find PyAudio output device")
+            return False
         self.stream_out = p_out.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
             output=True,
             frames_per_buffer=chunk_size,
-            output_device_index=self.output_device_names.get("pulse")
+            output_device_index=pyaudio_output_index
         )
         LOG.debug("output stream opened")
         self.out_running = True
@@ -198,13 +264,17 @@ class Audio(MumbleRunner):
         """ Input process """
         p_in = pyaudio.PyAudio()
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
+        pyaudio_input_index = self.__get_pyaudio_input_index(config)
+        if pyaudio_input_index is None:
+            LOG.error("cannot find PyAudio input device")
+            return False
         stream = p_in.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
             input=True,
             frames_per_buffer=chunk_size,
-            input_device_index=self.input_device_names.get("pulse")
+            input_device_index=pyaudio_input_index
         )
         LOG.debug("input stream opened")
         self.in_running = True
@@ -229,21 +299,23 @@ class Audio(MumbleRunner):
             return True
 
     def stop(self):
+        """ Stop the runnin threads """
         self.in_running = False
         self.out_running = False
 
-    def input_vol(self, dbint):
-        pass
 
 class AudioPipe(MumbleRunner):
     def _config(self):
+        """ Initial configuration """
         return {"PipeInput": {"func": self.__input_loop, "process": None},
                 "PipeOutput": {"func": self.__output_loop, "process": None}}
 
     def __output_loop(self, packet_length):
+        """ Output process """
         return None
 
     def __input_loop(self, packet_length, path):
+        """ Input process """
         ckunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
         while True:
             with open(path) as fifo_fd:
@@ -251,9 +323,6 @@ class AudioPipe(MumbleRunner):
                     data = fifo_fd.read(ckunk_size)
                     self.mumble.sound_output.add_sound(data)
 
-
-class Parser(MumbleRunner):
-    pass
 
 def prepare_mumble(host, user, password="", certfile=None,
                    codec_profile="audio", bandwidth=96000, channel=None):
@@ -294,6 +363,10 @@ def get_config(args):
     config["vox_silence_time"] = configdata.get("vox_silence_time", 3)
     config["audio_threshold"] = configdata.get("audio_threshold", 1000)
     config["audio_output_volume"] = configdata.get("audio_output_volume", 1)
+    config["input_pyaudio_name"] = configdata.get("input_pyaudio_name", "default")
+    config["input_pulse_name"] = configdata.get("input_pulse_name")
+    config["output_pyaudio_name"] = configdata.get("output_pyaudio_name", "default")
+    config["output_pulse_name"] = configdata.get("output_pulse_name")
     config["ptt_on_command"] = configdata.get("ptt_on_command")
     config["ptt_off_command"] = configdata.get("ptt_off_command")
     config["ptt_command_support"] = not (config["ptt_on_command"] is None or config["ptt_off_command"] is None)
@@ -372,6 +445,7 @@ def main(preserve_thread=True):
             except Exception as ex:
                 LOG.error("exception %s", ex)
                 return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

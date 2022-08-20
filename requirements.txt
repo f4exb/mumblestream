@@ -2,5 +2,6 @@ opuslib
 google
 protobuf-py3
 pyaudio
+pulsectl
 pymumble
 numpy
