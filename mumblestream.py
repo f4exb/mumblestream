@@ -29,6 +29,7 @@ LOG = logging.getLogger('Mumblestream')
 
 
 class Status(collections.UserList):
+    """ Thread status handler """
     def __init__(self, runner_obj):
         self.__runner_obj = runner_obj
         self.scheme = collections.namedtuple("thread_info", ("name", "alive"))
@@ -45,7 +46,7 @@ class Status(collections.UserList):
     def __repr__(self):
         repr_str = ""
         for status in self:
-            repr_str += "[%s] alive: %s " % (status.name, status.alive)
+            repr_str = f"[{status.name}] alive: {status.alive}"
         return repr_str
 
 
@@ -60,26 +61,28 @@ class Runner(collections.UserDict):
 
     def change_args(self, args_dict):
         """ Copy arguments """
-        for name in self.keys():
+        for name, value in self.items():
             if name in args_dict:
-                self[name]["args"] = args_dict[name]["args"]
-                self[name]["kwargs"] = args_dict[name]["kwargs"]
+                value["args"] = args_dict[name]["args"]
+                value["kwargs"] = args_dict[name]["kwargs"]
             else:
-                self[name]["args"] = None
-                self[name]["kwargs"] = None
+                value["args"] = None
+                value["kwargs"] = None
 
 
     def run(self):
         """ Spawns threads """
         for name, cdict in self.items():
             LOG.info("generating process")
-            self[name]["process"] = Thread(name=name,
-                                           target=cdict["func"],
-                                           args=cdict["args"],
-                                           kwargs=cdict["kwargs"])
+            cdict["process"] = Thread(
+                name=name,
+                target=cdict["func"],
+                args=cdict["args"],
+                kwargs=cdict["kwargs"]
+            )
             LOG.info("starting process")
-            self[name]["process"].daemon = True
-            self[name]["process"].start()
+            cdict["process"].daemon = True
+            cdict["process"].start()
             LOG.info("%s started", name)
         LOG.info("all done")
         self.is_ready = True
@@ -88,8 +91,7 @@ class Runner(collections.UserDict):
         """ Return a status """
         if self.is_ready:
             return Status(self)
-        else:
-            return list()
+        return []
 
     def stop(self, name=""):
         """ Stop and exit """
@@ -124,16 +126,16 @@ class Audio(MumbleRunner):
                 "output": {"func": self.__output_loop, "process": None}}
 
     def __init_audio(self):
-        p = pyaudio.PyAudio()
+        pa = pyaudio.PyAudio()
         if "input_pulse_name" in self.config or "output_pulse_name" in self.config:
             pulse = PulseAudioHandler('mumblestream')
-        input_device_names, output_device_names = self.__scan_devices(p)
+        input_device_names, output_device_names = self.__scan_devices(pa)
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
         pyaudio_output_index = self.__get_pyaudio_output_index(output_device_names)
         if pyaudio_output_index is None:
             LOG.error("cannot find PyAudio output device")
             return False
-        self.stream_out = p.open(
+        self.stream_out = pa.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
@@ -148,7 +150,7 @@ class Audio(MumbleRunner):
         if pyaudio_input_index is None:
             LOG.error("cannot find PyAudio input device")
             return False
-        self.stream_in = p.open(
+        self.stream_in = pa.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=pymumble.constants.PYMUMBLE_SAMPLERATE,
@@ -251,7 +253,7 @@ class Audio(MumbleRunner):
             LOG.debug("start receiving from %s", user["name"])
             self.in_user = user["name"]
             if self.ptt_on_command is not None: # PTT on
-                run_ptt_on_command = subprocess.run(self.ptt_on_command , shell=True)
+                run_ptt_on_command = subprocess.run(self.ptt_on_command , shell=True, check=True)
                 LOG.debug("PTT on exited with code %d", run_ptt_on_command.returncode)
         if self.stream_out is not None and user["name"] == self.in_user:
             self.receive_ts = time.time()
@@ -271,7 +273,7 @@ class Audio(MumbleRunner):
                     LOG.debug("stop receiving from %s", self.in_user)
                     if self.config["ptt_command_support"]: # PTT off
                         ptt_off_command = " ".join(self.config["ptt_off_command"])
-                        run_ptt_off_command = subprocess.run(ptt_off_command , shell=True)
+                        run_ptt_off_command = subprocess.run(ptt_off_command , shell=True, check=True)
                         LOG.debug("PTT off exited with code %d", run_ptt_off_command.returncode)
                     self.receive_ts = None
                     self.in_user = None
@@ -281,7 +283,7 @@ class Audio(MumbleRunner):
             self.mumble.callbacks.remove_callback(CLBK_SOUNDRECEIVED, self.__sound_received_handler)
             self.stream_out.close()
             LOG.debug("output stream closed")
-            return True
+        return True
 
     def __input_loop(self):
         """ Input process """
@@ -305,21 +307,22 @@ class Audio(MumbleRunner):
             LOG.debug("terminating")
             self.stream_in.close()
             LOG.debug("input stream closed")
-            return True
+        return True
 
-    def stop(self):
+    def stop(self, name=""):
         """ Stop the runnin threads """
         self.in_running = False
         self.out_running = False
 
 
 class AudioPipe(MumbleRunner):
+    """ Audio pipe """
     def _config(self):
         """ Initial configuration """
         return {"PipeInput": {"func": self.__input_loop, "process": None},
                 "PipeOutput": {"func": self.__output_loop, "process": None}}
 
-    def __output_loop(self, packet_length):
+    def __output_loop(self, _):
         """ Output process """
         return None
 
@@ -332,6 +335,8 @@ class AudioPipe(MumbleRunner):
                     data = fifo_fd.read(ckunk_size)
                     self.mumble.sound_output.add_sound(data)
 
+    def stop(self, name=""):
+        """ Stop the runnin threads """
 
 def prepare_mumble(host, user, password="", certfile=None,
                    codec_profile="audio", bandwidth=96000, channel=None):
@@ -343,7 +348,7 @@ def prepare_mumble(host, user, password="", certfile=None,
         LOG.error("cannot commect to %s: %s", host, ex)
         return None
 
-    mumble.set_application_string("mumblestream (%s)" % __version__)
+    mumble.set_application_string(f"mumblestream ({__version__})")
     mumble.set_codec_profile(codec_profile)
     mumble.set_receive_sound(1)  # Enable receiving sound from mumble server
     mumble.start()
@@ -425,7 +430,7 @@ def main(preserve_thread=True):
 
     if mumble is None:
         LOG.critical("cannot connect to Mumble server or channel")
-        sys.exit(1)
+        return 1
 
     if args.fifo_path:
         audio = AudioPipe(
@@ -470,6 +475,7 @@ def main(preserve_thread=True):
             except Exception as ex:
                 LOG.error("exception %s", ex)
                 return 1
+    return 0
 
 
 if __name__ == "__main__":
