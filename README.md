@@ -19,8 +19,6 @@ It is a fork of [pymumble-abot](https://github.com/ranomier/pymumble-abot).
 ### Python libraries
 See requirements.txt:
 * opuslib (Opus codec)
-* google (for Google Protocol Buffers)
-* protobuf-py3 (Google Protocol Buffers)
 * pyaudio (PortAudio)
 * pulsectl (Pulseaudio)
 * pymumble

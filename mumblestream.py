@@ -9,7 +9,7 @@ import argparse
 import sys
 import os
 import subprocess
-from threading import Thread, current_thread
+from threading import Thread
 import time
 import logging
 import json
