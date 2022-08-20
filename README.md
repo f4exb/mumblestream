@@ -1,7 +1,7 @@
 # Mumblestream
 A bot that streams host audio to/from a Mumble server.
 
-The bot uses PortAudio which works together with Jack, ALSA, OSS, PulseAudio, WASAPI, and more.
+The bot uses PortAudio which works together with Jack, ALSA, OSS, PulseAudio, WASAPI, and more. It can also assign Pulseaudio devices at startup.
 
 It uses the [pymumble library](https://github.com/azlux/pymumble).
 
@@ -22,6 +22,7 @@ See requirements.txt:
 * google (for Google Protocol Buffers)
 * protobuf-py3 (Google Protocol Buffers)
 * pyaudio (PortAudio)
+* pulsectl (Pulseaudio)
 * pymumble
 * numpy
 
@@ -52,11 +53,11 @@ You will need a configuration file to further customize your `mumblestream` inst
 - `input_pulse_name`: Optional pulseaudio device name to reroute the input from
 - `output_pyaudio_name`: PyAudio output device name. Default "default"
 - `output_pulse_name`: Optional pulseaudio device name to reroute the output to
-- `ptt_on_command`: Optional command to execute to turn host PTT on when receiving audio from Zello. It is in the form of a list of command followed by its arguments
-- `ptt_off_command`: Optional command to execute to turn host PTT off when audio from Zello has finished. It is in the form of a list of command followed by its arguments
+- `ptt_on_command`: Optional command to execute to turn host PTT on when receiving audio from Mumble. It is in the form of a list of command followed by its arguments
+- `ptt_off_command`: Optional command to execute to turn host PTT off when audio from Mumble has finished. It is in the form of a list of command followed by its arguments
 - `logging_level`: Set Python logging module to this level. Can be "critial", "error", "warning", "info" or "debug". Default "warning".
 
-`ptt_on_command` and `ptt_off_command` parameters are required for the PTT feature to be engaged.
+Both `ptt_on_command` and `ptt_off_command` parameters are required for the PTT feature to be engaged.
 
 You will find an example `sampleconfig.json` file in this repository
 
