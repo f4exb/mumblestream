@@ -141,7 +141,7 @@ class Audio(MumbleRunner):
 
     def __init_audio(self):
         pa = pyaudio.PyAudio()
-        if "input_pulse_name" in self.config or "output_pulse_name" in self.config:
+        if self.config["input_pulse_name"] is not None or self.config["output_pulse_name"] is not None:
             pulse = PulseAudioHandler("mumblestream")
         input_device_names, output_device_names = self.__scan_devices(pa)
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
@@ -158,7 +158,7 @@ class Audio(MumbleRunner):
             output_device_index=pyaudio_output_index,
         )
         LOG.debug("output stream opened")
-        if "output_pulse_name" in self.config:  # redirect output from mumblestream with pulseaudio
+        if self.config["output_pulse_name"] is not None:  # redirect output from mumblestream with pulseaudio
             self.__move_output_pulseaudio(pulse, self.config["output_pulse_name"])
         pyaudio_input_index = self.__get_pyaudio_input_index(input_device_names)
         if pyaudio_input_index is None:
@@ -173,7 +173,7 @@ class Audio(MumbleRunner):
             input_device_index=pyaudio_input_index,
         )
         LOG.debug("input stream opened")
-        if "input_pulse_name" in self.config:  # redirect input to mumblestream with pulseaudio
+        if self.config["input_pulse_name"] is not None:  # redirect input to mumblestream with pulseaudio
             self.__move_input_pulseaudio(pulse, self.config["input_pulse_name"])
         return True
 
@@ -197,7 +197,7 @@ class Audio(MumbleRunner):
 
     def __get_pyaudio_input_index(self, input_device_names):
         """Returns the PyAudio index of input device or None if no default"""
-        if "input_pulse_name" in self.config:
+        if self.config["input_pulse_name"] is not None:
             pyaudio_name = "pulse"
         else:
             pyaudio_name = self.config.get("input_pyaudio_name", "default")
@@ -205,7 +205,7 @@ class Audio(MumbleRunner):
 
     def __get_pyaudio_output_index(self, output_device_names):
         """Returns the PyAudio index of output device or None if no default"""
-        if "output_pulse_name" in self.config:
+        if self.config["output_pulse_name"] is not None:
             pyaudio_name = "pulse"
         else:
             pyaudio_name = self.config.get("output_pyaudio_name", "default")
