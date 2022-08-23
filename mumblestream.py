@@ -141,7 +141,7 @@ class Audio(MumbleRunner):
 
     def __init_audio(self):
         pa = pyaudio.PyAudio()
-        if self.config["input_pulse_name"] is not None or self.config["output_pulse_name"] is not None:
+        if self.config["input_pulse_name"] is not None or self.config["output_pulse_name"] is not None or self.config["output_pulse_mute"]:
             pulse = PulseAudioHandler("mumblestream")
         input_device_names, output_device_names = self.__scan_devices(pa)
         chunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * self.config["args"].packet_length)
@@ -158,7 +158,9 @@ class Audio(MumbleRunner):
             output_device_index=pyaudio_output_index,
         )
         LOG.debug("output stream opened")
-        if self.config["output_pulse_name"] is not None:  # redirect output from mumblestream with pulseaudio
+        if self.config["output_pulse_mute"]:
+            self.__mute_output_pulseaudio(pulse)
+        elif self.config["output_pulse_name"] is not None:  # redirect output from mumblestream with pulseaudio
             self.__move_output_pulseaudio(pulse, self.config["output_pulse_name"])
         pyaudio_input_index = self.__get_pyaudio_input_index(input_device_names)
         if pyaudio_input_index is None:
@@ -236,6 +238,17 @@ class Audio(MumbleRunner):
                 LOG.debug("moved pulseaudio sink input %d to sink %d", pulse_sink_input_index, pulse_sink_index)
             except Exception as ex:
                 LOG.error("exception assigning pulseaudio sink: %s", ex)
+
+    def __mute_output_pulseaudio(self, pulse):
+        pulse_sink_input_index = pulse.get_own_sink_input_index()
+        if pulse_sink_input_index is None:
+            LOG.warning("cannot mute pulseaudio sink input %d", pulse_sink_input_index)
+        else:
+            try:
+                pulse.mute_sink_input(pulse_sink_input_index, True)
+                LOG.debug("muted pulseaudio sink input %d", pulse_sink_input_index)
+            except Exception as ex:
+                LOG.error("exception muting pulseaudio sink input %d: %s", pulse_sink_input_index, ex)
 
     @staticmethod
     def __level(audio_bytes):
@@ -391,6 +404,7 @@ def get_config(args):
     config["input_pulse_name"] = configdata.get("input_pulse_name")
     config["output_pyaudio_name"] = configdata.get("output_pyaudio_name", "default")
     config["output_pulse_name"] = configdata.get("output_pulse_name")
+    config["output_pulse_mute"] = configdata.get("output_pulse_mute", 0) != 0
     config["ptt_on_command"] = configdata.get("ptt_on_command")
     config["ptt_off_command"] = configdata.get("ptt_off_command")
     config["ptt_command_support"] = not (config["ptt_on_command"] is None or config["ptt_off_command"] is None)

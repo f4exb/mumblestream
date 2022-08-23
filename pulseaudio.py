@@ -66,6 +66,14 @@ class PulseAudioHandler:
         except Exception as ex:
             print(f"PulseAudioHandler.move_sink_input: cannot move sink input: {ex}")
 
+    def mute_sink_input(self, sink_input_index, mute):
+        """Mute/unmute a Pulseaudio sink input"""
+        try:
+            self._pulse.sink_input_mute(sink_input_index, mute)
+        except Exception as ex:
+            print(f"PulseAudioHandler.mute_sink_input: cannot mute/unmute sink input: {ex}")
+
+
     def move_source_output(self, source_output_index, source_index):
         """Move a Pulseaudio source output to a sourcesource given their indexes"""
         try:
