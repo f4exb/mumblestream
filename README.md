@@ -51,6 +51,7 @@ You will need a configuration file to further customize your `mumblestream` inst
 - `input_pulse_name`: Optional pulseaudio device name to reroute the input from
 - `output_pyaudio_name`: PyAudio output device name. Default "default"
 - `output_pulse_name`: Optional pulseaudio device name to reroute the output to
+- `output_disable`: Set it to an integer value different of zero to disable audio output. Default 0 (false)
 - `ptt_on_command`: Optional command to execute to turn host PTT on when receiving audio from Mumble. It is in the form of a list of command followed by its arguments
 - `ptt_off_command`: Optional command to execute to turn host PTT off when audio from Mumble has finished. It is in the form of a list of command followed by its arguments
 - `logging_level`: Set Python logging module to this level. Can be "critial", "error", "warning", "info" or "debug". Default "warning".
