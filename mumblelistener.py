@@ -124,10 +124,6 @@ class Audio(MumbleRunner):
             return None
         # fmt: off
         return {
-            "input": {
-                "func": self.__input_loop,
-                "process": None
-            },
             "output": {
                 "func": self.__output_loop,
                 "process": None
@@ -232,10 +228,6 @@ class Audio(MumbleRunner):
             LOG.debug("output stream closed")
         return True
 
-    def __input_loop(self):
-        """Input process"""
-        return None
-
     def stop(self, name=""):
         """Stop the runnin threads"""
         self.out_running = False
@@ -248,10 +240,6 @@ class AudioPipe(MumbleRunner):
         """Initial configuration"""
         # fmt: off
         return {
-            "PipeInput": {
-                "func": self.__input_loop,
-                "process": None
-            },
             "PipeOutput": {
                 "func": self.__output_loop,
                 "process": None
@@ -262,15 +250,6 @@ class AudioPipe(MumbleRunner):
     def __output_loop(self, _):
         """Output process"""
         return None
-
-    def __input_loop(self, packet_length, path):
-        """Input process"""
-        ckunk_size = int(pymumble.constants.PYMUMBLE_SAMPLERATE * packet_length)
-        while True:
-            with open(path) as fifo_fd:
-                while True:
-                    data = fifo_fd.read(ckunk_size)
-                    self.mumble.sound_output.add_sound(data)
 
     def stop(self, name=""):
         """Stop the runnin threads"""
@@ -365,10 +344,6 @@ def main(preserve_thread=True):
                     "args": (args.packet_length,),
                     "kwargs": None
                 },
-                "input": {
-                    "args": (args.packet_length, args.fifo_path),
-                    "kwargs": None
-                },
             },
         )
     else:
@@ -380,10 +355,6 @@ def main(preserve_thread=True):
                     "args": [],
                     "kwargs": None
                 },
-                "input": {
-                    "args": [],
-                    "kwargs": None
-                }
             }
         )
     # fmt: on
