@@ -14,10 +14,9 @@ import logging
 import json
 import collections
 
+import audioop
 import pymumble_py3 as pymumble
-from pymumble_py3.callbacks import PYMUMBLE_CLBK_SOUNDRECEIVED as CLBK_SOUNDRECEIVED
 import pyaudio
-import numpy as np
 
 from pulseaudio import PulseAudioHandler
 
@@ -117,10 +116,9 @@ class Audio(MumbleRunner):
 
     def _config(self):
         self.stream_out = None
-        self.in_user = None
-        self.receive_ts = None
         self.out_running = None
         self.out_volume = 1
+        self.in_users = {}
         """Initial configuration"""
         if not self.__init_audio():
             return None
@@ -202,40 +200,34 @@ class Audio(MumbleRunner):
             except Exception as ex:
                 LOG.error("exception assigning pulseaudio sink: %s", ex)
 
-    @staticmethod
-    def __level(audio_bytes):
-        """Return maximum signal chunk magnitude"""
-        alldata = bytearray()
-        alldata.extend(audio_bytes)
-        data = np.frombuffer(alldata, dtype=np.short)
-        return max(abs(data))
-
-    def __sound_received_handler(self, user, soundchunk):
-        """Pymumble sound received callback"""
-        if self.in_user is None:
-            LOG.debug("start receiving from %s", user["name"])
-            self.in_user = user["name"]
-        if self.stream_out is not None and user["name"] == self.in_user:
-            self.receive_ts = time.time()
-            np_audio = np.frombuffer(soundchunk.pcm, dtype=np.short)
-            np_audio = (np_audio * self.out_volume).astype(np.short)
-            self.stream_out.write(np_audio.tobytes())
-
     def __output_loop(self):
         """Output process"""
         self.out_volume = self.config["audio_output_volume"]
         self.out_running = True
         try:
-            self.mumble.callbacks.set_callback(CLBK_SOUNDRECEIVED, self.__sound_received_handler)
             while self.out_running:
-                if self.receive_ts is not None and time.time() > self.receive_ts + 1:
-                    LOG.debug("stop receiving from %s", self.in_user)
-                    self.receive_ts = None
-                    self.in_user = None
-                time.sleep(0.1)
+                sound_frag = None
+                for user_session_id in list(self.mumble.users):
+                    user = self.mumble.users[user_session_id]
+                    user_name = user["name"]
+                    if user.sound.is_sound():
+                        if user_name not in self.in_users:
+                            LOG.debug("start receiving audio from %s", user_name)
+                            self.in_users[user_name] = 0
+                        self.in_users[user_name] = time.time()
+                        if sound_frag is None:
+                            sound_frag = user.sound.get_sound().pcm
+                        else:
+                            sound_frag = audioop.add(sound_frag, user.sound.get_sound().pcm, 2)
+                    else:
+                        if user_name in self.in_users and time.time() > self.in_users[user_name] + 0.5:
+                            LOG.debug("stop receiving audio from %s", user_name)
+                            self.in_users.pop(user_name)
+                if sound_frag is not None:
+                    self.stream_out.write(sound_frag)
+                time.sleep(0.005)
         finally:
             LOG.debug("terminating")
-            self.mumble.callbacks.remove_callback(CLBK_SOUNDRECEIVED, self.__sound_received_handler)
             self.stream_out.close()
             LOG.debug("output stream closed")
         return True
