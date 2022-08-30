@@ -97,4 +97,5 @@ ENV/
 certificates/*
 cert.pem
 config.json
+listener.json
 core*
