@@ -118,7 +118,6 @@ class Audio(MumbleRunner):
     def _config(self):
         self.stream_out = None
         self.out_running = None
-        self.out_volume = 1
         self.in_users = {}
         self.receive_ts = None
         self.ptt_on_command = None
@@ -207,7 +206,6 @@ class Audio(MumbleRunner):
 
     def __output_loop(self):
         """Output process"""
-        self.out_volume = self.config["audio_output_volume"]
         self.ptt_on_command = " ".join(self.config["ptt_on_command"]) if self.config["ptt_command_support"] else None
         self.ptt_off_command = " ".join(self.config["ptt_off_command"]) if self.config["ptt_command_support"] else None
         self.out_running = True
@@ -326,7 +324,6 @@ def get_config(args):
     else:
         configdata = {}
 
-    config["audio_output_volume"] = configdata.get("audio_output_volume", 1)
     config["output_pyaudio_name"] = configdata.get("output_pyaudio_name", "default")
     config["output_pulse_name"] = configdata.get("output_pulse_name")
     config["ptt_on_command"] = configdata.get("ptt_on_command")
