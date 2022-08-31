@@ -8,6 +8,7 @@ DESC:   A bot that streams audio from a Mumble server to host audio.
 import argparse
 import sys
 import os
+import subprocess
 from threading import Thread
 import time
 import logging
@@ -44,7 +45,7 @@ class Status(collections.UserList):
     def __repr__(self):
         repr_str = ""
         for status in self:
-            repr_str = f"[{status.name}] alive: {status.alive}"
+            repr_str += f"[{status.name}] alive: {status.alive} "
         return repr_str
 
 
@@ -119,6 +120,10 @@ class Audio(MumbleRunner):
         self.out_running = None
         self.out_volume = 1
         self.in_users = {}
+        self.receive_ts = None
+        self.ptt_on_command = None
+        self.ptt_off_command = None
+        self.ptt_running = None
         """Initial configuration"""
         if not self.__init_audio():
             return None
@@ -127,7 +132,11 @@ class Audio(MumbleRunner):
             "output": {
                 "func": self.__output_loop,
                 "process": None
-            }
+            },
+            "ptt": {
+                "func": self.__ptt_loop,
+                "process": None
+            },
         }
         # fmt: on
 
@@ -199,6 +208,8 @@ class Audio(MumbleRunner):
     def __output_loop(self):
         """Output process"""
         self.out_volume = self.config["audio_output_volume"]
+        self.ptt_on_command = " ".join(self.config["ptt_on_command"]) if self.config["ptt_command_support"] else None
+        self.ptt_off_command = " ".join(self.config["ptt_off_command"]) if self.config["ptt_command_support"] else None
         self.out_running = True
         try:
             while self.out_running:
@@ -207,10 +218,14 @@ class Audio(MumbleRunner):
                     user = self.mumble.users[user_session_id]
                     user_name = user["name"]
                     if user.sound.is_sound():
+                        if self.config["ptt_command_support"] and self.receive_ts is None:
+                            run_ptt_on_command = subprocess.run(self.ptt_on_command, shell=True, check=True)
+                            LOG.debug("PTT on exited with code %d", run_ptt_on_command.returncode)
                         if user_name not in self.in_users:
                             LOG.debug("start receiving audio from %s", user_name)
                             self.in_users[user_name] = 0
-                        self.in_users[user_name] = time.time()
+                        self.receive_ts = time.time()
+                        self.in_users[user_name] = self.receive_ts
                         if sound_frag is None:
                             sound_frag = user.sound.get_sound().pcm
                         else:
@@ -228,9 +243,21 @@ class Audio(MumbleRunner):
             LOG.debug("output stream closed")
         return True
 
+    def __ptt_loop(self):
+        """PTT process"""
+        self.ptt_running = True
+        while self.ptt_running:
+            if self.config["ptt_command_support"] and self.receive_ts is not None and time.time() > self.receive_ts + 1:
+                run_ptt_off_command = subprocess.run(self.ptt_off_command, shell=True, check=True)
+                LOG.debug("PTT off exited with code %d", run_ptt_off_command.returncode)
+                self.receive_ts = None
+            time.sleep(0.1)
+        return True
+
     def stop(self, name=""):
         """Stop the runnin threads"""
         self.out_running = False
+        self.ptt_running = False
 
 
 class AudioPipe(MumbleRunner):
@@ -243,12 +270,20 @@ class AudioPipe(MumbleRunner):
             "PipeOutput": {
                 "func": self.__output_loop,
                 "process": None
-            }
+            },
+            "PipePTT": {
+                "func": self.__ptt_loop,
+                "process": None
+            },
         }
         # fmt: on
 
     def __output_loop(self, _):
         """Output process"""
+        return None
+
+    def __ptt_loop(self):
+        """PTT process"""
         return None
 
     def stop(self, name=""):
@@ -294,6 +329,9 @@ def get_config(args):
     config["audio_output_volume"] = configdata.get("audio_output_volume", 1)
     config["output_pyaudio_name"] = configdata.get("output_pyaudio_name", "default")
     config["output_pulse_name"] = configdata.get("output_pulse_name")
+    config["ptt_on_command"] = configdata.get("ptt_on_command")
+    config["ptt_off_command"] = configdata.get("ptt_off_command")
+    config["ptt_command_support"] = not (config["ptt_on_command"] is None or config["ptt_off_command"] is None)
     config["logging_level"] = configdata.get("logging_level", "warning")
     return config
 
@@ -344,6 +382,10 @@ def main(preserve_thread=True):
                     "args": (args.packet_length,),
                     "kwargs": None
                 },
+                "ptt": {
+                    "args": [],
+                    "kwargs": None
+                },
             },
         )
     else:
@@ -352,6 +394,10 @@ def main(preserve_thread=True):
             config,
             {
                 "output": {
+                    "args": [],
+                    "kwargs": None
+                },
+                "ptt": {
                     "args": [],
                     "kwargs": None
                 },
