@@ -46,7 +46,7 @@ class Status(collections.UserList):
     def __repr__(self):
         repr_str = ""
         for status in self:
-            repr_str = f"[{status.name}] alive: {status.alive}"
+            repr_str += f"[{status.name}] alive: {status.alive} "
         return repr_str
 
 
