@@ -272,7 +272,8 @@ class Audio(MumbleRunner):
             LOG.debug("start receiving from %s", user["name"])
             self.in_user = user["name"]
             if self.ptt_on_command is not None:  # PTT on
-                run_ptt_on_command = subprocess.run(self.ptt_on_command, shell=True, check=True)
+                run_ptt_on_command = subprocess.run(
+                    self.ptt_on_command, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                 LOG.debug("PTT on exited with code %d", run_ptt_on_command.returncode)
         if self.stream_out is not None and user["name"] == self.in_user:
             self.receive_ts = time.time()
@@ -295,7 +296,8 @@ class Audio(MumbleRunner):
                     LOG.debug("stop receiving from %s", self.in_user)
                     if self.config["ptt_command_support"]:  # PTT off
                         ptt_off_command = " ".join(self.config["ptt_off_command"])
-                        run_ptt_off_command = subprocess.run(ptt_off_command, shell=True, check=True)
+                        run_ptt_off_command = subprocess.run(
+                            ptt_off_command, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                         LOG.debug("PTT off exited with code %d", run_ptt_off_command.returncode)
                     self.receive_ts = None
                     self.in_user = None

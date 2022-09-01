@@ -217,7 +217,8 @@ class Audio(MumbleRunner):
                     user_name = user["name"]
                     if user.sound.is_sound():
                         if self.config["ptt_command_support"] and self.receive_ts is None:
-                            run_ptt_on_command = subprocess.run(self.ptt_on_command, shell=True, check=True)
+                            run_ptt_on_command = subprocess.run(
+                                self.ptt_on_command, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                             LOG.debug("PTT on exited with code %d", run_ptt_on_command.returncode)
                         if user_name not in self.in_users:
                             LOG.debug("start receiving audio from %s", user_name)
@@ -245,8 +246,9 @@ class Audio(MumbleRunner):
         """PTT process"""
         self.ptt_running = True
         while self.ptt_running:
-            if self.config["ptt_command_support"] and self.receive_ts is not None and time.time() > self.receive_ts + 1:
-                run_ptt_off_command = subprocess.run(self.ptt_off_command, shell=True, check=True)
+            if self.config["ptt_command_support"] and self.receive_ts is not None and time.time() > self.receive_ts + 2:
+                run_ptt_off_command = subprocess.run(
+                    self.ptt_off_command, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                 LOG.debug("PTT off exited with code %d", run_ptt_off_command.returncode)
                 self.receive_ts = None
             time.sleep(0.1)
