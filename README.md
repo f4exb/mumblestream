@@ -25,11 +25,14 @@ See requirements.txt:
 * numpy
 
 ## Installation
+### Prerequisites (Ubuntu/Debian)
+    sudo apt install python3-dev portaudio19-dev
+
 ### Install on Linux with virtualenv
 Login as a user; do not execute the following commands as root :) of course... but always worth to mention.
 
     cd
-	git https://github.com/f4exb/mumblestream.git
+	git clone https://github.com/f4exb/mumblestream.git
 	cd mumblestream
 
 	python -m venv venv
